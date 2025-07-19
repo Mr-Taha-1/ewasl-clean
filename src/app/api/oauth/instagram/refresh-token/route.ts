@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 
+// Force dynamic rendering to prevent static generation issues
+export const dynamic = 'force-dynamic';
+
 /**
  * Instagram Token Refresh Endpoint
  * Refreshes expired Instagram access tokens
@@ -54,14 +57,14 @@ async function handleTokenRefresh(request: NextRequest) {
       query.eq('id', accountId);
     }
 
-    const { data: accounts, error: accountsError } = await query;
+    const { data: accounts, error: fetchError } = await query;
 
-    if (accountsError) {
+    if (fetchError) {
       return NextResponse.json({
         success: false,
         error: 'Failed to fetch Instagram accounts',
-        message: 'فشل في استرجاع حسابات إنستغرام',
-        details: accountsError.message
+        message: 'فشل في جلب حسابات إنستغرام',
+        details: fetchError.message
       }, { status: 500 });
     }
 
@@ -75,69 +78,101 @@ async function handleTokenRefresh(request: NextRequest) {
 
     const refreshResults = [];
 
-    // Refresh tokens for each account
+    // Process each account
     for (const account of accounts) {
       try {
-        // Instagram Basic Display API token refresh
+        // Check if token needs refresh (expires within 7 days)
+        const expiresAt = new Date(account.token_expires_at);
+        const sevenDaysFromNow = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+        
+        if (expiresAt > sevenDaysFromNow) {
+          refreshResults.push({
+            accountId: account.id,
+            platform: account.platform,
+            status: 'skipped',
+            message: 'Token still valid',
+            messageAr: 'الرمز المميز لا يزال صالحاً',
+            expiresAt: account.token_expires_at
+          });
+          continue;
+        }
+
+        // Refresh the token
         const refreshResponse = await fetch(
           `https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token&access_token=${account.access_token}`,
           { method: 'GET' }
         );
 
-        if (refreshResponse.ok) {
-          const refreshData = await refreshResponse.json();
-          
-          // Update token in database
-          const expiresAt = new Date(Date.now() + (refreshData.expires_in * 1000));
-          
-          const { error: updateError } = await supabase
-            .from('social_accounts')
-            .update({
-              access_token: refreshData.access_token,
-              token_expires_at: expiresAt.toISOString(),
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', account.id);
-
+        if (!refreshResponse.ok) {
+          const errorData = await refreshResponse.json().catch(() => ({}));
           refreshResults.push({
             accountId: account.id,
-            accountName: account.account_name,
-            success: !updateError,
-            expiresAt: expiresAt.toISOString(),
-            error: updateError?.message
+            platform: account.platform,
+            status: 'failed',
+            error: errorData.error?.message || 'Token refresh failed',
+            message: 'فشل في تحديث الرمز المميز'
+          });
+          continue;
+        }
+
+        const tokenData = await refreshResponse.json();
+        
+        // Calculate new expiration (60 days from now)
+        const newExpiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000);
+
+        // Update the account with new token
+        const { error: updateError } = await supabase
+          .from('social_accounts')
+          .update({
+            access_token: tokenData.access_token,
+            token_expires_at: newExpiresAt.toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', account.id);
+
+        if (updateError) {
+          refreshResults.push({
+            accountId: account.id,
+            platform: account.platform,
+            status: 'failed',
+            error: 'Database update failed',
+            message: 'فشل في تحديث قاعدة البيانات',
+            details: updateError.message
           });
         } else {
-          const errorData = await refreshResponse.json();
           refreshResults.push({
             accountId: account.id,
-            accountName: account.account_name,
-            success: false,
-            error: errorData.error?.message || 'Token refresh failed'
+            platform: account.platform,
+            status: 'success',
+            message: 'Token refreshed successfully',
+            messageAr: 'تم تحديث الرمز المميز بنجاح',
+            expiresAt: newExpiresAt.toISOString()
           });
         }
+
       } catch (error) {
         refreshResults.push({
           accountId: account.id,
-          accountName: account.account_name,
-          success: false,
-          error: error instanceof Error ? error.message : 'Unknown error'
+          platform: account.platform,
+          status: 'failed',
+          error: error instanceof Error ? error.message : 'Unknown error',
+          message: 'حدث خطأ غير متوقع'
         });
       }
     }
 
-    const successCount = refreshResults.filter(r => r.success).length;
-    const totalCount = refreshResults.length;
+    const successCount = refreshResults.filter(r => r.status === 'success').length;
+    const failedCount = refreshResults.filter(r => r.status === 'failed').length;
 
     return NextResponse.json({
       success: successCount > 0,
-      message: `Refreshed ${successCount}/${totalCount} Instagram tokens`,
-      messageAr: `تم تحديث ${successCount}/${totalCount} رموز إنستغرام`,
+      message: `Processed ${accounts.length} accounts: ${successCount} successful, ${failedCount} failed`,
+      messageAr: `تم معالجة ${accounts.length} حسابات: ${successCount} نجح، ${failedCount} فشل`,
       data: {
-        totalAccounts: totalCount,
-        successfulRefreshes: successCount,
-        failedRefreshes: totalCount - successCount,
-        results: refreshResults,
-        timestamp: new Date().toISOString()
+        totalAccounts: accounts.length,
+        successCount,
+        failedCount,
+        results: refreshResults
       }
     });
 
@@ -146,7 +181,7 @@ async function handleTokenRefresh(request: NextRequest) {
     return NextResponse.json({
       success: false,
       error: 'Token refresh failed',
-      message: 'فشل في تحديث الرموز المميزة',
+      message: 'فشل في تحديث الرمز المميز',
       details: error instanceof Error ? error.message : 'Unknown error'
     }, { status: 500 });
   }
