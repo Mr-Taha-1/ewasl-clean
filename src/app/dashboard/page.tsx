@@ -1,6 +1,13 @@
 "use client";
 
 import React, { useEffect, useState, useCallback } from "react";
+import { useAuth } from "@/hooks/useAuth";
+import { WelcomeSection } from "@/components/dashboard/welcome-section";
+import { StatsCard } from "@/components/dashboard/stats-card";
+import { QuickActions } from "@/components/dashboard/quick-actions";
+import { RealtimeActivityFeed } from "@/components/dashboard/realtime-activity-feed";
+import { SocialConnectionsWidget } from "@/components/dashboard/social-connections-widget";
+import { QueueStatusWidget } from "@/components/dashboard/queue-status-widget";
 import { AnalyticsCharts } from "@/components/dashboard/analytics-charts";
 import { MobileDashboardLayout } from "@/components/dashboard/mobile-dashboard-layout";
 import { MessageSquare, Calendar, BarChart3, Users, TrendingUp, Heart, RefreshCw } from "lucide-react";
@@ -45,6 +52,7 @@ interface DashboardData {
 }
 
 export default function DashboardPage() {
+  const { user } = useAuth();
   const [language] = useState<'ar' | 'en'>('ar');
   const [isMobile, setIsMobile] = useState(false);
   
@@ -72,16 +80,17 @@ export default function DashboardPage() {
   } = useDataCache(
     'dashboard-data',
     async () => {
-      const response = await fetch('/api/metrics', {
+      const response = await fetch('/api/analytics/dashboard', {
         headers: { 'Cache-Control': 'no-cache' },
       });
-      const data = await response.json();
-
+      
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to load dashboard data');
+        // If API fails, return fallback data
+        throw new Error('API not available, using fallback data');
       }
-
-      return data;
+      
+      const data = await response.json();
+      return data.dashboard_metrics;
     },
     {
       cacheTime: 5 * 60 * 1000, // 5 minutes
@@ -93,13 +102,32 @@ export default function DashboardPage() {
 
   // Fallback data for when API fails
   const fallbackData = {
-    data: {
-      system: {
-        totalPosts: 156,
-        totalAccounts: 8,
-        scheduledPosts: 24,
-        completedPosts: 132
-      }
+    overview: {
+      total_posts: 156,
+      scheduled_posts: 24,
+      published_today: 8,
+      engagement_rate: 4.2,
+      followers_growth: 156,
+      reach: 12450
+    },
+    recent_activity: [],
+    performance: {
+      best_performing_post: {
+        content: 'Tips for better engagement',
+        platform: 'instagram',
+        engagement_rate: 8.5,
+        reach: 5670
+      },
+      top_platforms: [
+        { name: 'Instagram', posts: 45, engagement: 6.2 },
+        { name: 'Twitter', posts: 38, engagement: 4.8 },
+        { name: 'Facebook', posts: 32, engagement: 3.9 }
+      ]
+    },
+    upcoming: {
+      posts_this_week: 12,
+      posts_next_week: 8,
+      scheduled_campaigns: 3
     }
   };
 
@@ -113,6 +141,19 @@ export default function DashboardPage() {
     console.log('DashboardPage: Component mounted');
     console.log('Performance metrics:', performanceMetrics);
   }, [performanceMetrics]);
+
+  const getUserName = () => {
+    if (user?.user_metadata?.full_name) {
+      return user.user_metadata.full_name;
+    }
+    if (user?.user_metadata?.name) {
+      return user.user_metadata.name;
+    }
+    if (user?.email) {
+      return user.email.split('@')[0];
+    }
+    return 'المستخدم';
+  };
 
   if (isLoading && !dashboardData) {
     return (
@@ -157,167 +198,110 @@ export default function DashboardPage() {
   }
 
   const dashboardContent = (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-purple-50">
-      <div className="container mx-auto px-4 py-8">
-        {/* Dashboard Header with Refresh */}
-        <div className={cn(
-          "flex items-center justify-between mb-6",
-          language === 'ar' ? "flex-row-reverse" : ""
-        )}>
-          <div className="text-center">
-            <div className="w-16 h-16 bg-gradient-to-r from-blue-600 to-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
-              <span className="text-2xl font-bold text-white">eW</span>
-            </div>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-              لوحة التحكم
-            </h1>
-            <p className="text-gray-600 mt-2">Enhanced Dashboard with Phase 2 Features</p>
-          </div>
-          <button
-            onClick={handleRetry}
-            disabled={isLoading}
-            className={cn(
-              "flex items-center gap-2 px-4 py-2 text-sm rounded-lg transition-colors",
-              language === 'ar' ? "flex-row-reverse" : "",
-              isLoading ? "text-gray-400 cursor-not-allowed" : "text-gray-600 hover:text-gray-900 hover:bg-gray-100",
-              isStale && "text-orange-600 bg-orange-50"
-            )}
-          >
-            <RefreshCw className={cn(
-              "h-4 w-4",
-              isLoading && "animate-spin"
-            )} />
-            <span>
-              {isStale ? (language === 'ar' ? 'البيانات قديمة - تحديث' : 'Stale Data - Refresh') : 
-               (language === 'ar' ? 'تحديث البيانات' : 'Refresh Data')}
-            </span>
-          </button>
-        </div>
+    <>
+      {/* Dashboard Header with Refresh */}
+      <div className={cn(
+        "flex items-center justify-between mb-6",
+        language === 'ar' ? "flex-row-reverse" : ""
+      )}>
+        <div></div> {/* Spacer */}
+        <button
+          onClick={handleRetry}
+          disabled={isLoading}
+          className={cn(
+            "flex items-center gap-2 px-4 py-2 text-sm rounded-lg transition-colors",
+            language === 'ar' ? "flex-row-reverse" : "",
+            isLoading ? "text-gray-400 cursor-not-allowed" : "text-gray-600 hover:text-gray-900 hover:bg-gray-100",
+            isStale && "text-orange-600 bg-orange-50"
+          )}
+        >
+          <RefreshCw className={cn(
+            "h-4 w-4",
+            isLoading && "animate-spin"
+          )} />
+          <span>
+            {isStale ? (language === 'ar' ? 'البيانات قديمة - تحديث' : 'Stale Data - Refresh') : 
+             (language === 'ar' ? 'تحديث البيانات' : 'Refresh Data')}
+          </span>
+        </button>
+      </div>
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-lg font-semibold text-gray-800">المنشورات</h3>
-              <MessageSquare className="h-5 w-5 text-blue-600" />
-            </div>
-            <p className="text-3xl font-bold text-blue-600">
-              {isLoading ? "..." : displayData?.data?.system?.totalPosts || 0}
-            </p>
-            <p className="text-sm text-gray-500">Total Posts</p>
-          </div>
+      {/* Welcome Section */}
+      <WelcomeSection 
+        userName={getUserName()}
+        language={language}
+      />
 
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-lg font-semibold text-gray-800">الحسابات</h3>
-              <Users className="h-5 w-5 text-green-600" />
-            </div>
-            <p className="text-3xl font-bold text-green-600">
-              {isLoading ? "..." : displayData?.data?.system?.totalAccounts || 0}
-            </p>
-            <p className="text-sm text-gray-500">Social Accounts</p>
-          </div>
-
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-lg font-semibold text-gray-800">المجدولة</h3>
-              <Calendar className="h-5 w-5 text-purple-600" />
-            </div>
-            <p className="text-3xl font-bold text-purple-600">
-              {isLoading ? "..." : displayData?.data?.system?.scheduledPosts || 0}
-            </p>
-            <p className="text-sm text-gray-500">Scheduled Posts</p>
-          </div>
-
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-lg font-semibold text-gray-800">المكتملة</h3>
-              <TrendingUp className="h-5 w-5 text-orange-600" />
-            </div>
-            <p className="text-3xl font-bold text-orange-600">
-              {isLoading ? "..." : displayData?.data?.system?.completedPosts || 0}
-            </p>
-            <p className="text-sm text-gray-500">Completed Posts</p>
-          </div>
-        </div>
-
-        {/* Phase 2 Feature: Interactive Analytics Charts */}
-        <AnalyticsCharts 
+      {/* Stats Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <StatsCard
+          title="إجمالي المنشورات"
+          value={displayData.overview.total_posts}
+          icon={MessageSquare}
+          change="+8.2%"
+          changeType="positive"
+          color="blue"
           language={language}
-          timeRange="30d"
-          className="mb-8"
+        />
+        <StatsCard
+          title="المنشورات المجدولة"
+          value={displayData.overview.scheduled_posts}
+          icon={Calendar}
+          change="هذا الأسبوع"
+          changeType="neutral"
+          color="purple"
+          language={language}
+        />
+        <StatsCard
+          title="التفاعل المتوقع"
+          value={displayData.overview.published_today}
+          icon={Heart}
+          change="24 جديد"
+          changeType="positive"
+          color="green"
+          language={language}
+        />
+        <StatsCard
+          title="إجمالي التفاعل"
+          value={displayData.overview.reach.toLocaleString()}
+          icon={TrendingUp}
+          change="+15.3%"
+          changeType="positive"
+          color="orange"
+          language={language}
+        />
+      </div>
+
+      {/* Quick Actions */}
+      <QuickActions language={language} />
+
+      {/* Dashboard Widgets Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+        {/* Activity Feed */}
+        <RealtimeActivityFeed 
+          language={language}
+          maxItems={8}
         />
 
-        {/* API Status */}
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
-          <h2 className="text-2xl font-bold text-gray-800 mb-4">حالة النظام</h2>
-          <p className="text-gray-600 mb-4">System Status</p>
-          
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="flex items-center space-x-3 space-x-reverse">
-              <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-              <span className="text-gray-700">قاعدة البيانات / Database</span>
-            </div>
-            <div className="flex items-center space-x-3 space-x-reverse">
-              <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-              <span className="text-gray-700">API المقاييس / Metrics API</span>
-            </div>
-            <div className="flex items-center space-x-3 space-x-reverse">
-              <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-              <span className="text-gray-700">اختبار المرحلة 1 / Phase 1 Test</span>
-            </div>
-            <div className="flex items-center space-x-3 space-x-reverse">
-              <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
-              <span className="text-gray-700">تحليلات المرحلة 2 / Phase 2 Analytics</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Quick Links */}
-        <div className="bg-white rounded-xl shadow-lg p-6">
-          <h2 className="text-2xl font-bold text-gray-800 mb-4">روابط سريعة</h2>
-          <p className="text-gray-600 mb-4">Quick Links</p>
-          
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <a 
-              href="/api/test-phase1" 
-              target="_blank"
-              className="block p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-            >
-              <h3 className="font-semibold text-blue-600">اختبار المرحلة 1</h3>
-              <p className="text-sm text-gray-500">Phase 1 Test API</p>
-            </a>
-            
-            <a 
-              href="/api/metrics" 
-              target="_blank"
-              className="block p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-            >
-              <h3 className="font-semibold text-green-600">مقاييس النظام</h3>
-              <p className="text-sm text-gray-500">System Metrics API</p>
-            </a>
-            
-            <a 
-              href="/api/oauth/instagram/refresh-token" 
-              target="_blank"
-              className="block p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-            >
-              <h3 className="font-semibold text-purple-600">تحديث الرموز</h3>
-              <p className="text-sm text-gray-500">Token Refresh API</p>
-            </a>
-
-            <a 
-              href="/api/analytics/charts" 
-              target="_blank"
-              className="block p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-            >
-              <h3 className="font-semibold text-indigo-600">تحليلات المرحلة 2</h3>
-              <p className="text-sm text-gray-500">Phase 2 Analytics API</p>
-            </a>
-          </div>
-        </div>
+        {/* Social Connections */}
+        <SocialConnectionsWidget 
+          language={language}
+        />
       </div>
-    </div>
+
+      {/* Queue Status */}
+      <QueueStatusWidget 
+        language={language}
+        className="mb-8"
+      />
+
+      {/* Advanced Analytics Charts */}
+      <AnalyticsCharts 
+        language={language}
+        timeRange="30d"
+        className="mt-8"
+      />
+    </>
   );
 
   // Use mobile layout for small screens
@@ -330,5 +314,12 @@ export default function DashboardPage() {
   }
 
   // Desktop layout
-  return dashboardContent;
+  return (
+    <div className={cn(
+      "space-y-8",
+      language === 'ar' ? "rtl" : "ltr"
+    )}>
+      {dashboardContent}
+    </div>
+  );
 }
